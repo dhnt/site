@@ -131,3 +131,14 @@ superseded revision with `stale, re-read`. A verified candidate previews at
 its own new revision in all three representations; `approve` and `undo` are
 `bashy shape` verbs, and the live page's `ETag` only moves when an approved
 candidate lands here, its pin is bumped, and the hosted plane is released.
+
+## Optional DNS TXT
+
+Publish an optional DNS TXT record at `_agents.<host>` so agents can discover
+the site without fetching it first:
+
+```text
+_agents.<host>  TXT  "v=agents1; index=https://<host>/agents.txt; mcp=https://<host>/mcp"
+```
+
+The record is advisory only; `/agents.txt` remains the canonical entry point.
