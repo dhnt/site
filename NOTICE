@@ -1,0 +1,10 @@
+dhnt/site
+Copyright 2026 DHNT Inc.
+
+The code in this repository (the renderer, the server, the checks and the
+build files) is licensed under the Apache License, Version 2.0; see LICENSE.
+
+The page content (content/*.md, site.json, and the text, names and
+biography they contain) is (c) 2026 DHNT Inc. All rights reserved. It is
+published here so the pages can be rendered, served, cited and shaped; it is
+not licensed under the Apache License.
