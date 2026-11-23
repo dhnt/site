@@ -2,7 +2,7 @@
 title: DHNT
 path: /
 summary: dhnt turns the computers you already own into one coherent, self-hostable, agent-operable mesh. bashy, the open-source agentic shell, is the foundation; cloudbox and outpost are built on bashy.
-sections: [what, start, shape]
+sections: what, start, shape
 ---
 
 ## What dhnt is {#what}

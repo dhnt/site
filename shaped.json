@@ -1,0 +1,1 @@
+{"server": {"main": "cmd/server", "args": ["-addr", "$ADDR", "-data", "$DATA"]}}

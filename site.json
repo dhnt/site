@@ -1,6 +1,7 @@
 {
   "title": "DHNT",
-  "canonical": "https://ai.dhnt.io",
+  "origin": "https://ai.dhnt.io",
+  "owner": "dhnt",
   "nav": [
     {"label": "Home", "href": "/"},
     {"label": "About", "href": "/about"},

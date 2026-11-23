@@ -2,7 +2,7 @@
 title: DHNT Inc.
 path: /about
 summary: DHNT Inc. builds dhnt: a self-hostable, agent-operable mesh for the computers you already own.
-sections: [about, team, contact]
+sections: about, team, contact
 ---
 
 ## About {#about}
