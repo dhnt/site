@@ -174,7 +174,14 @@ func checkParitySite(s *Site) error {
 		if !found {
 			return errors.New("agents: /agents.txt missing blank-line separator")
 		}
-		for _, k := range []string{"site:", "title:", "module:", "revision:", "index:", "agents_md:", "markdown:", "json:", "skill:", "skills_index:", "mcp:", "mcp_card:", "source:", "edit:", "shape:", "cite:", "bashy:"} {
+		keys := []string{"site:", "title:", "module:", "revision:", "index:", "agents_md:", "markdown:", "json:", "skill:", "skills_index:", "source:", "edit:", "shape:", "cite:"}
+		if s.Config.MCPEnabled() {
+			keys = append(keys, "mcp:", "mcp_card:")
+		}
+		if s.Config.siteAttachEnabled() {
+			keys = append(keys, "bashy:")
+		}
+		for _, k := range keys {
 			if !strings.Contains(head, k) {
 				return fmt.Errorf("agents: /agents.txt missing key %s", k)
 			}
@@ -194,13 +201,15 @@ func checkParitySite(s *Site) error {
 		if err := json.Unmarshal([]byte(s.RenderAgentSkillsIndex()), &skills); err != nil || skills.Version != "0.2.0" || len(skills.Skills) != 1 || skills.Skills[0].URL != "/skill.md" || len(skills.Skills[0].SHA) != 64 {
 			return fmt.Errorf("agents: invalid agent-skills index: %v", err)
 		}
-		var card map[string]any
-		if err := json.Unmarshal([]byte(s.RenderMCPServerCard()), &card); err != nil || card["schema_version"] != "mcp-server-card-v1" || card["endpoint"] != s.Config.MCP {
-			return fmt.Errorf("agents: invalid MCP server card: %v", err)
-		}
-		var oauth map[string]any
-		if err := json.Unmarshal([]byte(s.RenderOAuthProtectedResource()), &oauth); err != nil || oauth["resource"] != s.Config.MCP {
-			return fmt.Errorf("agents: invalid oauth-protected-resource: %v", err)
+		if s.Config.MCPEnabled() {
+			var card map[string]any
+			if err := json.Unmarshal([]byte(s.RenderMCPServerCard()), &card); err != nil || card["schema_version"] != "mcp-server-card-v1" || card["endpoint"] != s.Config.MCP {
+				return fmt.Errorf("agents: invalid MCP server card: %v", err)
+			}
+			var oauth map[string]any
+			if err := json.Unmarshal([]byte(s.RenderOAuthProtectedResource()), &oauth); err != nil || oauth["resource"] != s.Config.MCP {
+				return fmt.Errorf("agents: invalid oauth-protected-resource: %v", err)
+			}
 		}
 	}
 	return nil
@@ -263,7 +272,10 @@ func checkAgentPage(s *Site, p *Page, htmlDoc, mdDoc string, jsonDoc []byte) err
 	if !strings.HasPrefix(strings.TrimSpace(body), "## For agents {#agents}") {
 		return fmt.Errorf("agents: %s Markdown agent block is not first after front matter", p.Path)
 	}
-	for _, frag := range []string{"agent:\n", "  instructions:", "  agents_txt:", "  index:", "  skills:", "  skill:", "  mcp:", "  source:", "  edit:", "  cite:", "revision: " + p.Revision} {
+	if strings.Contains(mdDoc, "\n  mcp:") != s.Config.MCPEnabled() {
+		return fmt.Errorf("agents: %s Markdown MCP field disagrees with config", p.Path)
+	}
+	for _, frag := range []string{"agent:\n", "  instructions:", "  agents_txt:", "  index:", "  skills:", "  skill:", "  source:", "  edit:", "  cite:", "revision: " + p.Revision} {
 		if !strings.Contains(mdDoc, frag) {
 			return fmt.Errorf("agents: %s Markdown missing %q", p.Path, frag)
 		}
@@ -272,6 +284,9 @@ func checkAgentPage(s *Site, p *Page, htmlDoc, mdDoc string, jsonDoc []byte) err
 		return fmt.Errorf("agents: %s Markdown block differs", p.Path)
 	}
 	// HTML head/link/meta
+	if strings.Contains(htmlDoc, `<link rel="service-desc" href="/.well-known/mcp/server-card.json">`) != s.Config.MCPEnabled() {
+		return fmt.Errorf("agents: %s HTML MCP link disagrees with config", p.Path)
+	}
 	for _, frag := range []string{
 		`<meta name="agent:instructions" content="` + want.Instructions + `">`,
 		`<meta name="generator" content="bashy site 0.2.0">`,
@@ -281,7 +296,6 @@ func checkAgentPage(s *Site, p *Page, htmlDoc, mdDoc string, jsonDoc []byte) err
 		`<link rel="describedby" href="/llms.txt">`,
 		`<link rel="edit" href="` + want.Edit + `">`,
 		`<link rel="service-doc" href="/AGENTS.md">`,
-		`<link rel="service-desc" href="/.well-known/mcp/server-card.json">`,
 		`<link rel="canonical"`,
 		`<link rel="author"`,
 		`<link rel="help"`,
@@ -370,7 +384,7 @@ func CheckLinksResolve(dir string) error {
 func checkLinksResolveSite(s *Site) error {
 	staticRoutes := map[string]bool{
 		"/robots.txt": true, "/llms.txt": true, "/agents.txt": true, "/AGENTS.md": true, "/README.md": true, "/skill.md": true, "/humans.txt": true, "/sitemap.xml": true, "/feed.xml": true,
-		"/.well-known/agent-skills/index.json": true, "/.well-known/mcp/server-card.json": true, "/.well-known/oauth-protected-resource": true, "/.well-known/agent-card.json": true, "/.well-known/api-catalog": true, "/.well-known/security.txt": true,
+		"/.well-known/agent-skills/index.json": true, "/.well-known/mcp/server-card.json": s.Config.MCPEnabled(), "/.well-known/oauth-protected-resource": s.Config.MCPEnabled(), "/.well-known/agent-card.json": true, "/.well-known/api-catalog": true, "/.well-known/security.txt": true,
 	}
 	for _, p := range s.Pages {
 		mdTwin, jsonTwin := TwinPaths(p.Path)

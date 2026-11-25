@@ -66,7 +66,11 @@ func (s *Site) BashyShapedValue(p *Page) string {
 		}
 		return v
 	}
-	return `module="` + s.Config.Module + `", revision="` + rev + `", agents="/agents.txt", skill="` + rel(s.Config.Skill) + `", mcp="` + rel(s.Config.MCP) + `", source="` + s.Config.Source + `", shape="` + rel(s.Config.Shape) + `"`
+	mcp := ""
+	if s.Config.MCPEnabled() {
+		mcp = `, mcp="` + rel(s.Config.MCP) + `"`
+	}
+	return `module="` + s.Config.Module + `", revision="` + rev + `", agents="/agents.txt", skill="` + rel(s.Config.Skill) + `"` + mcp + `, source="` + s.Config.Source + `", shape="` + rel(s.Config.Shape) + `"`
 }
 func (s *Site) LinkHeaderValue(p *Page) string {
 	if p == nil {
@@ -86,9 +90,11 @@ func (s *Site) LinkHeaderValue(p *Page) string {
 	if s.Config.Source != "" {
 		parts = append(parts, `<`+s.Config.Source+`>; rel="via"`)
 	}
+	parts = append(parts, `</AGENTS.md>; rel="service-doc"`)
+	if s.Config.MCPEnabled() {
+		parts = append(parts, `</.well-known/mcp/server-card.json>; rel="service-desc"`)
+	}
 	parts = append(parts,
-		`</AGENTS.md>; rel="service-doc"`,
-		`</.well-known/mcp/server-card.json>; rel="service-desc"`,
 		`<`+canonicalURL+`>; rel="canonical"`,
 		`</humans.txt>; rel="author"`,
 		`</llms.txt>; rel="help"`,
@@ -123,13 +129,7 @@ func (h *routeHandler) serveError(w http.ResponseWriter, r *http.Request, status
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(status)
 	if r.Method != http.MethodHead {
-		home := h.site.homePage()
-		note := `<p id="agent-note" role="note">This site is agent-ready: instructions at #agents - see /agents.txt and /llms.txt</p>`
-		if home != nil {
-			if info := h.site.AgentInfoFor(home); info != nil {
-				note = `<p id="agent-note" role="note">This site is agent-ready: instructions at #agents - MCP ` + info.MCP + ` - skill ` + info.Skill + `</p>`
-			}
-		}
+		note := h.site.agentNote()
 		_, _ = w.Write([]byte("<!DOCTYPE html>\n<html lang=\"en\"><head><meta charset=\"utf-8\"><title>" + msg + "</title></head><body>\n" + note + "\n<h1>" + msg + "</h1><p><a href=\"/llms.txt\">Site index</a></p></body></html>\n"))
 	}
 }
@@ -186,9 +186,17 @@ func (h *routeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.serveText(w, r, "application/json; charset=utf-8", h.site.RenderAgentSkillsIndex())
 		return
 	case "/.well-known/mcp/server-card.json":
+		if !h.site.Config.MCPEnabled() {
+			h.serveError(w, r, http.StatusNotFound, "not found")
+			return
+		}
 		h.serveText(w, r, "application/json; charset=utf-8", h.site.RenderMCPServerCard())
 		return
 	case "/.well-known/oauth-protected-resource":
+		if !h.site.Config.MCPEnabled() {
+			h.serveError(w, r, http.StatusNotFound, "not found")
+			return
+		}
 		h.serveText(w, r, "application/json; charset=utf-8", h.site.RenderOAuthProtectedResource())
 		return
 	case "/.well-known/agent-card.json":

@@ -2,6 +2,8 @@
   "title": "DHNT",
   "origin": "https://ai.dhnt.io",
   "owner": "dhnt",
+  "mcp": "off",
+  "site_attach": false,
   "nav": [
     {"label": "Home", "href": "/"},
     {"label": "About", "href": "/about"},

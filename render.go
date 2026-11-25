@@ -38,6 +38,7 @@ type Config struct {
 	Source          string    `json:"source,omitempty"`
 	EditURL         string    `json:"edit_url,omitempty"`
 	MCP             string    `json:"mcp,omitempty"`
+	SiteAttach      *bool     `json:"site_attach,omitempty"`
 	Skill           string    `json:"skill,omitempty"`
 	Shape           string    `json:"shape,omitempty"`
 	AgentUserAgents []string  `json:"agent_user_agents,omitempty"`
@@ -45,6 +46,11 @@ type Config struct {
 }
 
 var DefaultAgentUserAgents = []string{"Claude-User", "ClaudeCode", "claude-code", "Codex", "codex-cli", "Gemini-CLI", "gemini-cli", "OpenCode", "opencode", "ChatGPT-User", "OAI-SearchBot", "Perplexity-User", "Google-Extended", "bashy-fetch", "bashy-site"}
+
+// MCPEnabled reports whether the site publishes MCP discovery metadata.
+func (c Config) MCPEnabled() bool { return c.MCP != "off" }
+
+func (c Config) siteAttachEnabled() bool { return c.SiteAttach == nil || *c.SiteAttach }
 
 func (c *Config) applyDefaults() {
 	c.Module = strings.TrimSpace(c.Module)
@@ -87,7 +93,7 @@ type AgentInfo struct {
 	Index        string `json:"index"`
 	Skills       string `json:"skills"`
 	Skill        string `json:"skill"`
-	MCP          string `json:"mcp"`
+	MCP          string `json:"mcp,omitempty"`
 	Source       string `json:"source"`
 	Edit         string `json:"edit"`
 	Shape        string `json:"shape,omitempty"`
@@ -525,21 +531,22 @@ func (s *Site) AgentInfoFor(p *Page) *AgentInfo {
 	if p == nil {
 		return nil
 	}
-	mdTwin, _ := TwinPaths(p.Path)
-	_ = mdTwin
-	return &AgentInfo{
+	info := &AgentInfo{
 		Instructions: s.Config.Origin + p.Path + "#agents",
 		AgentsTxt:    s.Config.Origin + "/agents.txt",
 		Index:        s.Config.Origin + "/llms.txt",
 		Skills:       s.Config.Origin + "/.well-known/agent-skills/index.json",
 		Skill:        s.Config.Skill,
-		MCP:          s.Config.MCP,
 		Source:       s.Config.Source,
 		Edit:         s.EditURL(p),
 		Shape:        s.Config.Shape,
 		Cite:         s.Config.Origin + p.Path + " @ " + p.Revision + " {url, section_id, revision, section_sha256, quote}",
 		Recipe:       s.AgentRecipe(p),
 	}
+	if s.Config.MCPEnabled() {
+		info.MCP = s.Config.MCP
+	}
+	return info
 }
 func (p *Page) agentSite() *Site { return p.site }
 func (s *Site) AgentRecipe(p *Page) string {
@@ -547,22 +554,45 @@ func (s *Site) AgentRecipe(p *Page) string {
 	lines := []string{
 		"# Agent recipe for " + s.Config.Title,
 		"# Read /agents.txt first, then fetch the Markdown twin.",
-		"# Next: bashy site attach " + s.Config.Origin + "  (or connect MCP at " + s.Config.MCP + ")",
-		"# Skill: " + s.Config.Skill,
-		"# JSON twin: " + s.Config.Origin + jsonTwin,
-		"# Cite sections as {url, section_id, revision, section_sha256, quote}; revision " + p.Revision,
-		"bashy fetch " + s.Config.Origin + "/agents.txt",
-		"bashy fetch " + s.Config.Origin + mdTwin,
 	}
+	next := ""
+	if s.Config.siteAttachEnabled() {
+		next = "# Next: bashy site attach " + s.Config.Origin
+	}
+	if s.Config.MCPEnabled() {
+		if next == "" {
+			next = "# Next: connect MCP at " + s.Config.MCP
+		} else {
+			next += "  (or connect MCP at " + s.Config.MCP + ")"
+		}
+	}
+	if next != "" {
+		lines = append(lines, next)
+	}
+	lines = append(lines,
+		"# Skill: "+s.Config.Skill,
+		"# JSON twin: "+s.Config.Origin+jsonTwin,
+		"# Cite sections as {url, section_id, revision, section_sha256, quote}; revision "+p.Revision,
+		"bashy fetch "+s.Config.Origin+"/agents.txt",
+		"bashy fetch "+s.Config.Origin+mdTwin,
+	)
 	return strings.Join(lines, "\n")
 }
 func (s *Site) AgentBlockBody(p *Page) string {
 	info := s.AgentInfoFor(p)
 	mdTwin, jsonTwin := TwinPaths(p.Path)
+	skill := "Equip yourself with the skill at " + info.Skill + " (skills index " + info.Skills + ")"
+	if info.MCP != "" {
+		skill += " and connect to MCP at " + info.MCP
+	}
+	skill += " ."
+	if s.Config.siteAttachEnabled() {
+		skill += " Run: bashy site attach " + s.Config.Origin
+	}
 	lines := []string{
 		"This site is agent-ready and shaping-enabled, built with bashy. If you are an agent, start here.",
 		"Read this page as Markdown at " + s.Config.Origin + mdTwin + " or as JSON at " + s.Config.Origin + jsonTwin + " ; use Accept: text/markdown for the Markdown twin. The site index is " + info.Index + " and the agent entry point is " + info.AgentsTxt + " .",
-		"Equip yourself with the skill at " + info.Skill + " (skills index " + info.Skills + ") and connect to MCP at " + info.MCP + " . Run: bashy site attach " + s.Config.Origin,
+		skill,
 		"Source: " + info.Source + " . Propose changes through the per-page edit URL " + info.Edit + " and pull requests.",
 		"Shape: register the source as a shaped app, then wish, verify, preview, approve and undo. Shape URL: " + info.Shape,
 		"Cite sections as {url, section_id, revision, section_sha256, quote}; this page revision is " + p.Revision + " .",
@@ -591,13 +621,17 @@ func (s *Site) RenderAgentsTxt() string {
 	b.WriteString("json: " + s.Config.Origin + jsonTwin + "\n")
 	b.WriteString("skill: " + info.Skill + "\n")
 	b.WriteString("skills_index: " + info.Skills + "\n")
-	b.WriteString("mcp: " + info.MCP + "\n")
-	b.WriteString("mcp_card: " + s.Config.Origin + "/.well-known/mcp/server-card.json\n")
+	if info.MCP != "" {
+		b.WriteString("mcp: " + info.MCP + "\n")
+		b.WriteString("mcp_card: " + s.Config.Origin + "/.well-known/mcp/server-card.json\n")
+	}
 	b.WriteString("source: " + info.Source + "\n")
 	b.WriteString("edit: " + info.Edit + "\n")
 	b.WriteString("shape: " + info.Shape + "\n")
 	b.WriteString("cite: " + info.Cite + "\n")
-	b.WriteString("bashy: bashy site attach " + s.Config.Origin + "\n")
+	if s.Config.siteAttachEnabled() {
+		b.WriteString("bashy: bashy site attach " + s.Config.Origin + "\n")
+	}
 	b.WriteString("\n")
 	b.WriteString(s.AgentBlockMarkdown(p))
 	return b.String()
@@ -618,13 +652,23 @@ func (s *Site) RenderAGENTSmd() string {
 }
 func (s *Site) RenderSkillMD() string {
 	name := s.SkillName()
-	return "---\nname: " + name + "\ndescription: Read and cite pages on " + s.Config.Title + " (" + s.Config.Origin + ") via /agents.txt, Markdown and JSON twins, and MCP.\nmetadata:\n  requires: \"has=bashy\"\n---\n# " + name + "\n\nOrigin: " + s.Config.Origin + "\n\nRead " + s.Config.Origin + "/agents.txt first, fetch the .md and .json twins, cite as {url, section_id, revision, section_sha256, quote}, and connect to MCP at " + s.Config.MCP + ".\n"
+	channels := "/agents.txt, Markdown and JSON twins"
+	connect := ""
+	if s.Config.MCPEnabled() {
+		channels += ", and MCP"
+		connect = ", and connect to MCP at " + s.Config.MCP
+	}
+	return "---\nname: " + name + "\ndescription: Read and cite pages on " + s.Config.Title + " (" + s.Config.Origin + ") via " + channels + ".\nmetadata:\n  requires: \"has=bashy\"\n---\n# " + name + "\n\nOrigin: " + s.Config.Origin + "\n\nRead " + s.Config.Origin + "/agents.txt first, fetch the .md and .json twins, cite as {url, section_id, revision, section_sha256, quote}" + connect + ".\n"
 }
 func (s *Site) RenderReadmeMD() string {
 	return "# " + s.Config.Title + "\n\n" + s.Config.Origin + "\n\nAgent-ready site. Read /agents.txt and /AGENTS.md for agent instructions; see /llms.txt for the index.\n"
 }
 func (s *Site) RenderHumansTxt() string {
-	return "/* SITE */\nSite: " + s.Config.Title + "\nOrigin: " + s.Config.Origin + "\n\n/* AGENTS */\nAgents: " + s.Config.Origin + "/agents.txt\nInstructions: " + s.Config.Origin + "/AGENTS.md\nMCP: " + s.Config.MCP + "\nSkill: " + s.Config.Skill + "\n"
+	mcp := ""
+	if s.Config.MCPEnabled() {
+		mcp = "MCP: " + s.Config.MCP + "\n"
+	}
+	return "/* SITE */\nSite: " + s.Config.Title + "\nOrigin: " + s.Config.Origin + "\n\n/* AGENTS */\nAgents: " + s.Config.Origin + "/agents.txt\nInstructions: " + s.Config.Origin + "/AGENTS.md\n" + mcp + "Skill: " + s.Config.Skill + "\n"
 }
 func (s *Site) RenderAgentSkillsIndex() string {
 	skill := s.RenderSkillMD()
@@ -634,11 +678,17 @@ func (s *Site) RenderAgentSkillsIndex() string {
 	return string(b) + "\n"
 }
 func (s *Site) RenderMCPServerCard() string {
+	if !s.Config.MCPEnabled() {
+		return ""
+	}
 	obj := map[string]any{"schema_version": "mcp-server-card-v1", "name": s.SkillName(), "title": s.Config.Title, "version": "0.2.0", "endpoint": s.Config.MCP, "transport": "streamable-http", "authentication": map[string]any{"type": "cookie-or-oauth2", "oauth_protected_resource": s.Config.Origin + "/.well-known/oauth-protected-resource"}, "tools": []string{"list_pages", "read_page", "cite", "shape_wish", "shape_verify", "shape_preview", "shape_approve", "shape_undo"}}
 	b, _ := json.MarshalIndent(obj, "", "  ")
 	return string(b) + "\n"
 }
 func (s *Site) RenderOAuthProtectedResource() string {
+	if !s.Config.MCPEnabled() {
+		return ""
+	}
 	obj := map[string]any{"resource": s.Config.MCP, "authorization_servers": []string{s.Config.Origin}}
 	b, _ := json.MarshalIndent(obj, "", "  ")
 	return string(b) + "\n"
@@ -654,7 +704,11 @@ func (s *Site) RenderAPICatalog() string {
 		Rel  string `json:"rel"`
 		Type string `json:"type,omitempty"`
 	}
-	links := []link{{s.Config.MCP, "service-desc", "application/json"}, {s.Config.Origin + "/agents.txt", "service-doc", "text/plain"}, {s.Config.Origin + "/llms.txt", "describedby", "text/plain"}}
+	var links []link
+	if s.Config.MCPEnabled() {
+		links = append(links, link{s.Config.MCP, "service-desc", "application/json"})
+	}
+	links = append(links, link{s.Config.Origin + "/agents.txt", "service-doc", "text/plain"}, link{s.Config.Origin + "/llms.txt", "describedby", "text/plain"})
 	for _, p := range s.Pages {
 		mdTwin, jsonTwin := TwinPaths(p.Path)
 		links = append(links, link{s.Config.Origin + mdTwin, "alternate", "text/markdown"}, link{s.Config.Origin + jsonTwin, "alternate", "application/json"})
@@ -693,6 +747,14 @@ func (s *Site) RenderAtomFeed() string {
 	return b.String()
 }
 
+func (s *Site) agentNote() string {
+	mcp := ""
+	if s.Config.MCPEnabled() {
+		mcp = " - MCP " + html.EscapeString(s.Config.MCP)
+	}
+	return `<p id="agent-note" role="note">This site is agent-ready: instructions at #agents` + mcp + " - skill " + html.EscapeString(s.Config.Skill) + "</p>"
+}
+
 // RenderHTMLFragment renders the semantic HTML fragment for p.
 func RenderHTMLFragment(p *Page) string {
 	return p.RenderHTMLFragment()
@@ -714,8 +776,7 @@ func (p *Page) RenderHTMLFragment() string {
 	var b strings.Builder
 	b.WriteString(`<article data-path="` + html.EscapeString(p.Path) + `" data-revision="` + html.EscapeString(p.Revision) + `">` + "\n")
 	if p.site != nil {
-		info := p.site.AgentInfoFor(p)
-		b.WriteString(`<p id="agent-note" role="note">This site is agent-ready: instructions at #agents - MCP ` + html.EscapeString(info.MCP) + ` - skill ` + html.EscapeString(info.Skill) + `</p>` + "\n")
+		b.WriteString(p.site.agentNote() + "\n")
 	}
 	if len(p.Nav) > 0 {
 		b.WriteString(`<nav aria-label="Site">` + "\n")
@@ -777,7 +838,9 @@ func (s *Site) RenderHTMLDocument(p *Page) string {
 		}
 	}
 	b.WriteString(`<link rel="service-doc" href="/AGENTS.md">` + "\n")
-	b.WriteString(`<link rel="service-desc" href="/.well-known/mcp/server-card.json">` + "\n")
+	if s.Config.MCPEnabled() {
+		b.WriteString(`<link rel="service-desc" href="/.well-known/mcp/server-card.json">` + "\n")
+	}
 	b.WriteString(`<link rel="author" href="/humans.txt">` + "\n")
 	b.WriteString(`<link rel="help" href="/llms.txt">` + "\n")
 	// JSON-LD
@@ -818,7 +881,9 @@ func (p *Page) RenderMarkdown() string {
 		b.WriteString("  index: " + yamlScalar(info.Index) + "\n")
 		b.WriteString("  skills: " + yamlScalar(info.Skills) + "\n")
 		b.WriteString("  skill: " + yamlScalar(info.Skill) + "\n")
-		b.WriteString("  mcp: " + yamlScalar(info.MCP) + "\n")
+		if info.MCP != "" {
+			b.WriteString("  mcp: " + yamlScalar(info.MCP) + "\n")
+		}
 		b.WriteString("  source: " + yamlScalar(info.Source) + "\n")
 		b.WriteString("  edit: " + yamlScalar(info.Edit) + "\n")
 		b.WriteString("  cite: " + yamlScalar(info.Cite) + "\n")
@@ -864,7 +929,11 @@ func (p *Page) RenderJSON() ([]byte, error) {
 func (s *Site) RenderRobotsTxt() string {
 	var b strings.Builder
 	b.WriteString("# Agent-ready site: read /agents.txt and /AGENTS.md for agent instructions.\n")
-	b.WriteString("# MCP: " + s.Config.MCP + " Skill: " + s.Config.Skill + "\n")
+	b.WriteString("# ")
+	if s.Config.MCPEnabled() {
+		b.WriteString("MCP: " + s.Config.MCP + " ")
+	}
+	b.WriteString("Skill: " + s.Config.Skill + "\n")
 	b.WriteString("User-agent: *\nAllow: /\n")
 	b.WriteString("Sitemap: " + s.Config.Origin + "/sitemap.xml\n")
 	return b.String()
